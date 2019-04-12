@@ -2,136 +2,37 @@ package main
 
 import (
 	"database/sql"
-	"encoding/json"
 	"log"
 	"net/http"
-	"os"
 
+	"github.com/dendna/examp-rest-1/controllers"
+	"github.com/dendna/examp-rest-1/driver"
+	"github.com/dendna/examp-rest-1/models"
 	"github.com/gorilla/mux"
-	"github.com/lib/pq"
 	"github.com/subosito/gotenv"
 )
 
-// Book ...
-type Book struct {
-	ID     int    `json:"id"`
-	Title  string `json:"title"`
-	Author string `json:"author"`
-	Year   string `json:"year"`
-}
-
-var books []Book
+var books []models.Book
 var db *sql.DB
 
 func init() {
 	gotenv.Load()
 }
 
-func logFatal(err error) {
-	if err != nil {
-		log.Fatal(err)
-	}
-}
-
 func main() {
 
-	pgURL, err := pq.ParseURL(os.Getenv("ELEPHANTSQL_URL"))
-	logFatal(err)
-
-	db, err = sql.Open("postgres", pgURL)
-	logFatal(err)
-
-	err = db.Ping()
-	logFatal(err)
+	db = driver.ConnectDB()
 
 	router := mux.NewRouter()
 
-	router.HandleFunc("/books", getBooks).Methods("GET")
-	router.HandleFunc("/books/{id}", getBook).Methods("GET")
-	router.HandleFunc("/books", addBook).Methods("POST")
-	router.HandleFunc("/books", updateBook).Methods("PUT")
-	router.HandleFunc("/books/{id}", removeBook).Methods("DELETE")
+	controller := controllers.Controller{}
+
+	router.HandleFunc("/books", controller.GetBooks(db)).Methods("GET")
+	router.HandleFunc("/books/{id}", controller.GetBook(db)).Methods("GET")
+	router.HandleFunc("/books", controller.AddBook(db)).Methods("POST")
+	router.HandleFunc("/books", controller.UpdateBook(db)).Methods("PUT")
+	router.HandleFunc("/books/{id}", controller.RemoveBook(db)).Methods("DELETE")
 
 	log.Fatal(http.ListenAndServe(":8000", router))
 
-}
-
-func getBooks(w http.ResponseWriter, r *http.Request) {
-	var book Book
-	books = []Book{}
-
-	w.Header().Set("Content-Type", "application/json")
-
-	rows, err := db.Query("select id, title, author, year from books")
-	logFatal(err)
-
-	defer rows.Close()
-
-	for rows.Next() {
-		err := rows.Scan(&book.ID, &book.Title, &book.Author, &book.Year)
-		logFatal(err)
-
-		books = append(books, book)
-	}
-
-	json.NewEncoder(w).Encode(books)
-}
-
-func getBook(w http.ResponseWriter, r *http.Request) {
-	var book Book
-	params := mux.Vars(r)
-
-	w.Header().Set("Content-Type", "application/json")
-
-	rows := db.QueryRow("select id, title, author, year from books where id = $1", params["id"])
-	err := rows.Scan(&book.ID, &book.Title, &book.Author, &book.Year)
-	logFatal(err)
-
-	json.NewEncoder(w).Encode(book)
-
-}
-
-func addBook(w http.ResponseWriter, r *http.Request) {
-	var book Book
-	var bookID int
-
-	w.Header().Set("Content-Type", "application/json")
-
-	json.NewDecoder(r.Body).Decode(&book)
-
-	err := db.QueryRow("insert into books (title, author, year) values($1, $2, $3) returning id;",
-		book.Title, book.Author, book.Year).Scan(&bookID)
-	logFatal(err)
-
-	json.NewEncoder(w).Encode(bookID)
-
-}
-
-func updateBook(w http.ResponseWriter, r *http.Request) {
-	var book Book
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewDecoder(r.Body).Decode(&book)
-
-	res, err := db.Exec("update books set title=$1, author=$2, year=$3 where id=$4 returning id;",
-		&book.Title, &book.Author, &book.Year, &book.ID)
-	logFatal(err)
-
-	rowsUpdated, err := res.RowsAffected()
-	logFatal(err)
-
-	json.NewEncoder(w).Encode(rowsUpdated)
-}
-
-func removeBook(w http.ResponseWriter, r *http.Request) {
-	params := mux.Vars(r)
-
-	w.Header().Set("Content-Type", "application/json")
-	res, err := db.Exec("delete from books where id = $1", params["id"])
-	logFatal(err)
-
-	rowsDeleted, err := res.RowsAffected()
-	logFatal(err)
-
-	json.NewEncoder(w).Encode(rowsDeleted)
 }
